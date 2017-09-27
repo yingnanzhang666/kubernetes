@@ -168,9 +168,12 @@ func (s *EtcdOptions) ApplyWithStorageFactoryTo(factory serverstorage.StorageFac
 
 func (s *EtcdOptions) addEtcdHealthEndpoint(c *server.Config) {
 	c.HealthzChecks = append(c.HealthzChecks, healthz.NamedCheck("etcd", func(r *http.Request) error {
-		done, err := preflight.EtcdConnection{ServerList: s.StorageConfig.ServerList}.CheckEtcdServers()
+		done, err := preflight.EtcdConnection{
+			ServerList: s.StorageConfig.ServerList,
+			TLSConfig:  s.StorageConfig.TLSConfig(),
+		}.CheckEtcdServers()
 		if !done {
-			return fmt.Errorf("etcd failed")
+			return fmt.Errorf("all etcd failed")
 		}
 		if err != nil {
 			return err

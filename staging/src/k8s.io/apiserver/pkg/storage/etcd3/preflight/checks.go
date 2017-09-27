@@ -17,13 +17,21 @@ limitations under the License.
 package preflight
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/url"
 	"time"
+
+	etcdutil "k8s.io/apiserver/pkg/storage/etcd/util"
+	"k8s.io/kubernetes/pkg/probe"
+	httpprober "k8s.io/kubernetes/pkg/probe/http"
 )
 
-const connectionTimeout = 1 * time.Second
+const (
+	tcpTimeout  = 1 * time.Second
+	httpTimeout = 20 * time.Second
+)
 
 type connection interface {
 	serverReachable(address string) bool
@@ -34,6 +42,7 @@ type connection interface {
 // EtcdConnection holds the Etcd server list
 type EtcdConnection struct {
 	ServerList []string
+	TLSConfig  *tls.Config
 }
 
 func (EtcdConnection) serverReachable(connURL *url.URL) bool {
@@ -41,11 +50,24 @@ func (EtcdConnection) serverReachable(connURL *url.URL) bool {
 	if scheme == "http" || scheme == "https" || scheme == "tcp" {
 		scheme = "tcp"
 	}
-	if conn, err := net.DialTimeout(scheme, connURL.Host, connectionTimeout); err == nil {
+	if conn, err := net.DialTimeout(scheme, connURL.Host, tcpTimeout); err == nil {
 		defer conn.Close()
 		return true
 	}
 	return false
+}
+
+func (e EtcdConnection) serverHealthy(connURL *url.URL) bool {
+	prober := httpprober.NewWithTLSConfig(e.TLSConfig)
+	connURL.Path += "/health"
+	result, data, err := prober.Probe(connURL, nil, httpTimeout)
+	if err != nil || result == probe.Failure {
+		return false
+	}
+	if etcdutil.EtcdHealthCheck([]byte(data)) != nil {
+		return false
+	}
+	return true
 }
 
 func parseServerURI(serverURI string) (*url.URL, error) {
@@ -65,7 +87,7 @@ func (con EtcdConnection) CheckEtcdServers() (done bool, err error) {
 		if err != nil {
 			return false, err
 		}
-		if con.serverReachable(host) {
+		if con.serverReachable(host) && con.serverHealthy(host) {
 			return true, nil
 		}
 	}

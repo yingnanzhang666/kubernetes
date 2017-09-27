@@ -17,6 +17,11 @@ limitations under the License.
 package storagebackend
 
 import (
+	"crypto/tls"
+	"crypto/x509"
+	"io/ioutil"
+
+	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/storage/value"
 )
@@ -65,5 +70,30 @@ func NewDefaultConfig(prefix string, copier runtime.ObjectCopier, codec runtime.
 		DeserializationCacheSize: 0,
 		Copier: copier,
 		Codec:  codec,
+	}
+}
+
+// TLSConfig creates the tls config from cert file, keyfile and ca file
+func (c Config) TLSConfig() *tls.Config {
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	if len(c.CertFile) > 0 && len(c.KeyFile) > 0 {
+		cert, err := tls.LoadX509KeyPair(c.CertFile, c.KeyFile)
+		if err != nil {
+			glog.Errorf("failed to load key pair while getting backends: %s", err)
+		} else {
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+	}
+	if len(c.CAFile) > 0 {
+		if caCert, err := ioutil.ReadFile(c.CAFile); err != nil {
+			glog.Errorf("failed to read ca file while getting backends: %s", err)
+		} else {
+			caPool := x509.NewCertPool()
+			caPool.AppendCertsFromPEM(caCert)
+			tlsConfig.RootCAs = caPool
+			tlsConfig.InsecureSkipVerify = false
+		}
 	}
 }

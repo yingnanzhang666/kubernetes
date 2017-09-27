@@ -18,8 +18,6 @@ package storage
 
 import (
 	"crypto/tls"
-	"crypto/x509"
-	"io/ioutil"
 	"strings"
 
 	"github.com/golang/glog"
@@ -289,33 +287,11 @@ func (s *DefaultStorageFactory) Backends() []Backend {
 		servers.Insert(overrides.etcdLocation...)
 	}
 
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	if len(s.StorageConfig.CertFile) > 0 && len(s.StorageConfig.KeyFile) > 0 {
-		cert, err := tls.LoadX509KeyPair(s.StorageConfig.CertFile, s.StorageConfig.KeyFile)
-		if err != nil {
-			glog.Errorf("failed to load key pair while getting backends: %s", err)
-		} else {
-			tlsConfig.Certificates = []tls.Certificate{cert}
-		}
-	}
-	if len(s.StorageConfig.CAFile) > 0 {
-		if caCert, err := ioutil.ReadFile(s.StorageConfig.CAFile); err != nil {
-			glog.Errorf("failed to read ca file while getting backends: %s", err)
-		} else {
-			caPool := x509.NewCertPool()
-			caPool.AppendCertsFromPEM(caCert)
-			tlsConfig.RootCAs = caPool
-			tlsConfig.InsecureSkipVerify = false
-		}
-	}
-
 	backends := []Backend{}
 	for server := range servers {
 		backends = append(backends, Backend{
 			Server:    server,
-			TLSConfig: tlsConfig,
+			TLSConfig: s.StorageConfig.TLSConfig(),
 		})
 	}
 	return backends
