@@ -96,4 +96,5 @@ func (c Config) TLSConfig() *tls.Config {
 			tlsConfig.InsecureSkipVerify = false
 		}
 	}
+	return tlsConfig
 }

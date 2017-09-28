@@ -19,13 +19,14 @@ package preflight
 import (
 	"crypto/tls"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"net/http"
 	"net/url"
 	"time"
 
+	"github.com/golang/glog"
 	etcdutil "k8s.io/apiserver/pkg/storage/etcd/util"
-	"k8s.io/kubernetes/pkg/probe"
-	httpprober "k8s.io/kubernetes/pkg/probe/http"
 )
 
 const (
@@ -58,16 +59,40 @@ func (EtcdConnection) serverReachable(connURL *url.URL) bool {
 }
 
 func (e EtcdConnection) serverHealthy(connURL *url.URL) bool {
-	prober := httpprober.NewWithTLSConfig(e.TLSConfig)
+	if connURL == nil {
+		return true
+	}
 	connURL.Path += "/health"
-	result, data, err := prober.Probe(connURL, nil, httpTimeout)
-	if err != nil || result == probe.Failure {
+	glog.Infof("check etcd server healthz, connURL: %s", connURL.String())
+	req, err := http.NewRequest("GET", connURL.String(), nil)
+	if err != nil {
+		glog.Errorf("check etcd server healthz, new request err: %s", err)
 		return false
 	}
-	if etcdutil.EtcdHealthCheck([]byte(data)) != nil {
+	client := http.Client{
+		Timeout:   httpTimeout,
+		Transport: &http.Transport{TLSClientConfig: e.TLSConfig, DisableKeepAlives: true},
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		glog.Errorf("check etcd server healthz, do request err: %s", err)
 		return false
 	}
-	return true
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		glog.Errorf("check etcd server healthz, read response err: %s", err)
+		return false
+	}
+	glog.Infof("check etcd server healthz, response body: %s", string(body))
+	if res.StatusCode >= http.StatusOK && res.StatusCode < http.StatusBadRequest {
+		glog.Infof("status code ok")
+		if etcdutil.EtcdHealthCheck(body) == nil {
+			glog.Infof("check etcd server healtzh, etcd health check ok.")
+			return true
+		}
+	}
+	return false
 }
 
 func parseServerURI(serverURI string) (*url.URL, error) {
